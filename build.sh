@@ -9,6 +9,3 @@ for f in $(find . -type f ! -name "manifest.sha256"); do
   hash=$(sha256sum "$f" | cut -d ' ' -f1)
   echo "${f:2} $hash"
 done > manifest.sha256
-cp manifest.sha256 ../
-cd ..
-rm -rf deploy 
