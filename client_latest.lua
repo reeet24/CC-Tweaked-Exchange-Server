@@ -1,5 +1,6 @@
 local net = require("modules.net")
 local ecc = require("modules.ecc")
+local pShell = require("modules.shell")
 net.setProtocolVersion("v1.0")
 peripheral.find("modem", rednet.open)
 local json = textutils
@@ -66,18 +67,40 @@ end
 load()
 
 local function list_peripherals()
-    local response, err = net.request(serverID, "list_peripherals", {}, 5)
+    local response, err = net.request(serverID, "list_peripherals", {sessionKey = sessionToken, publicKey = UserData.PublicKey}, 5)
 
-    if response and response.success then
+    if not response then
+        print("Error:", err or "No response from server")
+        return
+    end
+
+    if response.success then
         for _, p in ipairs(response.peripherals) do
             print("Peripheral:", p.name)
             print("  Type:    ", p.type)
             print("  Methods: ", table.concat(p.methods, ", "))
         end 
     else
-        print("Failed to list peripherals:", err)
+        print("Failed to list peripherals:", response.error)
     end
 end
+
+pShell.register("list_peripherals", list_peripherals, "List available peripherals")
+pShell.register("reboot", function()
+    print("Rebooting...")
+    sleep(2)
+    os.reboot()
+end, "Reboot the computer")
+pShell.register("ping", function()
+    local response, err = net.request(serverID, "ping", {time = os.epoch("utc")}, 5)
+    if not response then
+        print("Ping failed:", err or "No response from server")
+        return
+    else
+        print("Ping response:", response.status or "No status")
+        print("Message:", response.message or "No message")
+    end
+end, "Ping the server")
 
 if response.new_version and response.code then
     print("Update received! Writing new version...")
@@ -126,4 +149,6 @@ else
     else
         print("Failed:", verify.reason)
     end
+
+    pShell.run("Shell> ")
 end

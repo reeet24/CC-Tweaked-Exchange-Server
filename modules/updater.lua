@@ -1,39 +1,24 @@
 -- updater.lua
 local Updater = {}
 
-local function http_get_json(url)
-  local res = http.get(url, {["User-Agent"] = "CCTweaked-Updater"})
-  if not res then return nil end
-  local data = textutils.unserializeJSON(res.readAll())
-  res.close()
-  return data
+-- Assumes user supplies `sha256(str)` function
+local function default_sha256(data)
+  if _G.sha256 then return _G.sha256(data)
+  else error("No SHA-256 implementation provided") end
 end
 
 local function http_get_text(url)
-  local res = http.get(url, {["User-Agent"] = "CCTweaked-Updater"})
+  local res = http.get(url, { ["User-Agent"] = "CCTweaked-Updater" })
   if not res then return nil end
   local content = res.readAll()
   res.close()
   return content
 end
 
-function Updater.get_latest_commit_sha(user, repo, branch)
-  local url = "https://api.github.com/repos/"..user.."/"..repo.."/commits/"..branch
-  local data = http_get_json(url)
-  if data and data.sha then
-    return data.sha
-  end
-  return nil
-end
-
-function Updater.download_file(user, repo, branch, filepath, save_as)
-  local url = "https://raw.githubusercontent.com/"..user.."/"..repo.."/"..branch.."/"..filepath
-  local content = http_get_text(url)
-  if not content then return false end
-  local file = fs.open(save_as or filepath, "w")
-  file.write(content)
-  file.close()
-  return true
+local function save_file(path, content)
+  local f = fs.open(path, "w")
+  f.write(content)
+  f.close()
 end
 
 function Updater.load_meta()
@@ -50,47 +35,102 @@ function Updater.save_meta(meta)
   f.close()
 end
 
-function Updater.check_and_update(config)
-  assert(config.user, "GitHub username required")
-  assert(config.repo, "GitHub repo name required")
-  assert(config.files, "Files list required")
-
-  local branch = config.branch or "main"
-  local user, repo = config.user, config.repo
-
-  local current_sha = Updater.get_latest_commit_sha(user, repo, branch)
-  if not current_sha then
-    print("Failed to fetch latest commit SHA.")
-    return false
+local function parse_manifest(text)
+  local hashes = {}
+  for line in text:gmatch("[^\r\n]+") do
+    local file, hash = line:match("^(%S+)%s+(%x+)$")
+    if file and hash then
+      hashes[file] = hash
+    end
   end
+  return hashes
+end
 
-  local meta = Updater.load_meta()
-  if meta.last_commit == current_sha then
-    print("Already up to date.")
-    return false
-  end
+function Updater.load_server_manifest(base_url)
+  local url = base_url .. "/manifest.sha256"
+  local text = http_get_text(url)
+  if not text then return nil end
+  return parse_manifest(text)
+end
 
-  print("Update available. Downloading...")
-  for _, file in ipairs(config.files) do
-    local remote_path = type(file) == "table" and file.remote or file
-    local local_path = type(file) == "table" and file.local_path or remote_path
-    if Updater.download_file(user, repo, branch, remote_path, local_path) then
-      print("Updated "..local_path)
-    else
-      print("Failed to download "..remote_path)
+function Updater.download_file_if_needed(base_url, remote_path, local_path, expected_hash, hasher)
+  local current_hash = nil
+
+  if fs.exists(local_path) then
+    local file = fs.open(local_path, "r")
+    local content = file.readAll()
+    file.close()
+    current_hash = hasher(content)
+    if current_hash == expected_hash then
+      return false, current_hash
     end
   end
 
-  meta.last_commit = current_sha
-  Updater.save_meta(meta)
-
-  if config.reboot_after then
-    print("Rebooting...")
-    sleep(1)
-    os.reboot()
+  local content = http_get_text(base_url .. "/" .. remote_path)
+  if not content then
+    print("✗ Failed to download " .. remote_path)
+    return false, nil
   end
 
-  return true
+  local new_hash = hasher(content)
+  if expected_hash and new_hash ~= expected_hash then
+    print("✗ Hash mismatch on " .. remote_path)
+    return false, nil
+  end
+
+  save_file(local_path, content)
+  return true, new_hash
+end
+
+function Updater.check_and_update(config)
+  assert(config.base_url, "base_url is required")
+  assert(config.files, "files list required")
+
+  local hasher = config.hasher or default_sha256
+  local meta = Updater.load_meta()
+  meta.files = meta.files or {}
+
+  local server_hashes = Updater.load_server_manifest(config.base_url)
+  if not server_hashes then
+    print("✗ Failed to load manifest.sha256 from server")
+    return false
+  end
+
+  local updated = false
+
+  for _, entry in ipairs(config.files) do
+    local remote_path = type(entry) == "table" and entry.remote or entry
+    local local_path = type(entry) == "table" and entry.local_path or remote_path
+    local expected_hash = server_hashes[remote_path]
+
+    print("Checking: " .. local_path)
+    if not expected_hash then
+      print("✗ Missing hash in manifest for: " .. remote_path)
+    else
+      local changed, hash = Updater.download_file_if_needed(config.base_url, remote_path, local_path, expected_hash, hasher)
+      if changed then
+        meta.files[local_path] = hash
+        updated = true
+        print("→ Updated: " .. local_path)
+      else
+        print("✓ Up to date: " .. local_path)
+      end
+    end
+  end
+
+  if updated then
+    meta.last_update_time = os.epoch("utc")
+    Updater.save_meta(meta)
+    if config.reboot_after then
+      print("Update complete. Rebooting...")
+      sleep(1)
+      os.reboot()
+    end
+  else
+    print("All files already up to date.")
+  end
+
+  return updated
 end
 
 return Updater
