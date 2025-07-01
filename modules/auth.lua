@@ -2,7 +2,6 @@
 local auth = {}
 local ecc = require("modules.ecc")
 local sha256 = require("modules.sha")
-local keyring = require("modules.keyring")
 local userdata = require("modules.userdata")
 
 local activeChallenges = {}
@@ -63,8 +62,8 @@ function auth.verifySession(sessionKey, id)
     if not sessionKey or not id then
         return false, "sessionKey and id are required"
     end
-    local userId = activeSessions[sessionKey]
-    if not userId then
+    local exists, userId = auth.sessionExists(sessionKey)
+    if not userId and not exists then
         return false, "invalid session key"
     end
     if userId ~= id then

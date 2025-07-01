@@ -46,6 +46,28 @@ local function parse_manifest(text)
   return hashes
 end
 
+function Updater.get_local_hashes(config)
+  assert(config.files, "config.files must be provided")
+  local hasher = config.hasher or _G.sha256 or error("No SHA-256 function provided")
+
+  local hashes = {}
+
+  for _, entry in ipairs(config.files) do
+    local local_path = type(entry) == "table" and entry.local_path or entry
+    if fs.exists(local_path) then
+      local f = fs.open(local_path, "r")
+      local content = f.readAll()
+      f.close()
+      hashes[local_path] = hasher(content)
+    else
+      hashes[local_path] = nil -- not found
+    end
+  end
+
+  return hashes
+end
+
+
 function Updater.load_server_manifest(base_url)
   local url = base_url .. "/manifest.sha256"
   local text = http_get_text(url)
