@@ -1,0 +1,14 @@
+{
+    "Lua.diagnostics.globals": [
+        "http",
+        "textutils",
+        "fs",
+        "sleep",
+        "peripheral",
+        "shell",
+        "rednet"
+    ],
+    "Lua.diagnostics.disable": [
+        "undefined-field"
+    ]
+}
