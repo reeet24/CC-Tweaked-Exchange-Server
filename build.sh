@@ -1,6 +1,7 @@
+rm -rf deploy
 mkdir -p deploy
 cp startup.lua deploy/
-cp server.lua deploy/
+cp update.lua deploy/
 cp client_latest.lua deploy/
 cp -r modules deploy/modules
 

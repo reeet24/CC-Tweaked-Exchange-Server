@@ -6,7 +6,7 @@ peripheral.find("modem", rednet.open)
 local json = textutils
 
 local selfPath = shell.getRunningProgram() -- or hardcoded path to client
-local clientVersion = "v0.7"
+local clientVersion = "v0.9"
 
 local dbPath = "userdata.txt"
 local UserData = {}
@@ -101,6 +101,30 @@ pShell.register("ping", function()
         print("Message:", response.message or "No message")
     end
 end, "Ping the server")
+
+pShell.register("get_user_data", function()
+    print("User Data:")
+    print("Username:", UserData.Username)
+    print("Public Key:", UserData.PublicKey)
+    print("Private Key: (hidden for security)")
+end, "Display user data")
+
+pShell.register("get_user_inventory", function()
+    local response, err = net.request(serverID, "get_user_inventory", {sessionKey = sessionToken, publicKey = UserData.PublicKey}, 5)
+    if not response then
+        print("Error:", err or "No response from server")
+        return
+    end
+
+    if response.success then
+        print("User Inventory:")
+        for _, item in ipairs(response.inventory) do
+            print("Item:", item.name, "Quantity:", item.count)
+        end
+    else
+        print("Failed to get inventory:", response.error)
+    end
+end, "Get user inventory")
 
 if response.new_version and response.code then
     print("Update received! Writing new version...")
